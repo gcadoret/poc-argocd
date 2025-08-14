@@ -1,0 +1,38 @@
+┌[guillaumecadoret☮PLXGDWK-PAR1244]-(~)
+└> k3d cluster create demo \
+  --servers 1 --agents 1 \
+  -p "80:80@loadbalancer" -p "443:443@loadbalancer"
+kubectl cluster-info
+INFO[0000] portmapping '80:80' targets the loadbalancer: defaulting to [servers:*:proxy agents:*:proxy] 
+INFO[0000] portmapping '443:443' targets the loadbalancer: defaulting to [servers:*:proxy agents:*:proxy] 
+INFO[0000] Prep: Network                                
+INFO[0000] Created network 'k3d-demo'                   
+INFO[0000] Created image volume k3d-demo-images         
+INFO[0000] Starting new tools node...                   
+INFO[0001] Pulling image 'ghcr.io/k3d-io/k3d-tools:5.8.3' 
+INFO[0001] Creating node 'k3d-demo-server-0'            
+INFO[0002] Starting node 'k3d-demo-tools'               
+INFO[0002] Pulling image 'docker.io/rancher/k3s:v1.31.5-k3s1' 
+INFO[0005] Creating node 'k3d-demo-agent-0'             
+INFO[0005] Creating LoadBalancer 'k3d-demo-serverlb'    
+INFO[0006] Pulling image 'ghcr.io/k3d-io/k3d-proxy:5.8.3' 
+INFO[0008] Using the k3d-tools node to gather environment information 
+INFO[0009] Starting new tools node...                   
+INFO[0009] Starting node 'k3d-demo-tools'               
+INFO[0010] Starting cluster 'demo'                      
+INFO[0010] Starting servers...                          
+INFO[0010] Starting node 'k3d-demo-server-0'            
+INFO[0012] Starting agents...                           
+INFO[0012] Starting node 'k3d-demo-agent-0'             
+INFO[0014] Starting helpers...                          
+INFO[0014] Starting node 'k3d-demo-serverlb'            
+INFO[0021] Injecting records for hostAliases (incl. host.k3d.internal) and for 4 network members into CoreDNS configmap... 
+INFO[0023] Cluster 'demo' created successfully!         
+INFO[0023] You can now use it like this:                
+kubectl cluster-info
+Kubernetes control plane is running at https://0.0.0.0:57409
+CoreDNS is running at https://0.0.0.0:57409/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+Metrics-server is running at https://0.0.0.0:57409/api/v1/namespaces/kube-system/services/https:metrics-server:https/proxy
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+┌[guillaumecadoret☮PLXGDWK-PAR1244]-(~)

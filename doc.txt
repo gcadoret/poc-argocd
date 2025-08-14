@@ -1,0 +1,278 @@
+mini-projet ArgoCD + Kubernetes qui tourne aussi bien sur Mac que sur Debian. Je te propose un POC ultra simple : un service web “hello” déployé par ArgoCD à partir d’un repo Git.
+
+Je te donne tout le plan + les manifests. Tu peux copier/coller tel quel.
+
+⸻
+
+⚙️ Choix de la plate-forme
+	•	Sur Mac (Apple Silicon ou Intel) : parfait pour un POC rapide. J’utilise k3d (k3s dans Docker) → rapide, léger, identique sur Mac et Debian.
+	•	Sur vraie Debian : très bien aussi, un poil plus “prod-like”. Même commandes avec k3d.
+
+Reco : commence sur Mac (2–3 minutes de setup), puis dupliques sur Debian si tu veux valider dans un env Linux.
+
+⸻
+
+0) Prérequis
+
+macOS
+
+# Homebrew (si besoin) : https://brew.sh
+brew install k3d kubectl argocd git
+# Docker Desktop installé et lancé (ou colima + docker)
+
+Debian (root ou sudo)
+
+# Docker
+apt-get update && apt-get install -y curl git ca-certificates
+curl -fsSL https://get.docker.com | sh
+usermod -aG docker $USER  # reconnecte-toi après
+
+# kubectl
+curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"
+chmod +x kubectl && mv kubectl /usr/local/bin/
+
+# k3d
+curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+# argocd CLI
+curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+chmod +x /usr/local/bin/argocd
+
+
+⸻
+
+1) Créer le cluster Kubernetes (k3d)
+
+On mappe les ports 80/443 du load-balancer pour un futur Ingress si tu veux, mais pour ce POC on fera du port-forward.
+
+k3d cluster create demo \
+  --servers 1 --agents 1 \
+  -p "80:80@loadbalancer" -p "443:443@loadbalancer"
+kubectl cluster-info
+
+
+⸻
+
+2) Installer Argo CD
+
+kubectl create namespace argocd
+kubectl apply -n argocd \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# Accès UI (localhost:8081)
+kubectl port-forward -n argocd svc/argocd-server 8081:80
+
+Mot de passe admin initial :
+
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath="{.data.password}" | base64 -d; echo
+
+Connexion CLI :
+
+argocd login localhost:8081 --username admin --password <le_mot_de_passe> --insecure
+
+
+⸻
+
+3) Préparer le repo Git (manifests)
+
+Crée un dossier (ou un repo GitHub/GitLab si tu veux faire “vrai” GitOps). Structure minimale :
+
+poc-argocd/
+├─ app/
+│  ├─ deployment.yaml
+│  └─ service.yaml
+└─ argocd/
+   └─ application.yaml
+
+app/deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+  labels: { app: hello }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: hello }
+  template:
+    metadata:
+      labels: { app: hello }
+    spec:
+      containers:
+        - name: hello
+          image: nginxdemos/hello:plain-text
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet: { path: "/", port: 80 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: "/", port: 80 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+app/service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello
+  labels: { app: hello }
+spec:
+  selector: { app: hello }
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+  type: ClusterIP
+
+Optionnel : tu peux ajouter plus tard un Ingress NGINX et afficher le service directement sur http://localhost, mais pour le POC on va tester en port-forward.
+
+argocd/application.yaml
+
+Remplace repoURL par ton repo (HTTPS ou SSH). Si tu restes en local sans Git distant, ArgoCD peut suivre un repo privé distant ; avec un repo purement local ce n’est pas pratique. Le plus simple : crée un repo GitHub public le temps du POC.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/<ton-user>/<ton-repo>.git
+    targetRevision: main
+    path: app
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+Initialise le Git :
+
+cd poc-argocd
+git init
+git add .
+git commit -m "POC ArgoCD hello app"
+# crée ton repo distant puis :
+git branch -M main
+git remote add origin https://github.com/<ton-user>/<ton-repo>.git
+git push -u origin main
+
+
+⸻
+
+4) Déclarer l’Application à ArgoCD
+
+Via kubectl (décrit en GitOps)
+
+kubectl apply -f argocd/application.yaml
+
+ou via CLI ArgoCD (alternative)
+
+argocd app create hello-app \
+  --repo https://github.com/<ton-user>/<ton-repo>.git \
+  --path app \
+  --dest-server https://kubernetes.default.svc \
+  --dest-namespace default \
+  --sync-policy automated \
+  --self-heal --auto-prune
+
+Vérifier / forcer la sync :
+
+argocd app get hello-app
+argocd app sync hello-app
+
+
+⸻
+
+5) Tester l’appli
+
+Port-forward vers le Service :
+
+kubectl port-forward svc/hello 8080:80
+
+Puis dans un autre terminal :
+
+curl -i http://localhost:8080/
+
+Tu devrais voir une réponse “Welcome to nginx!” (version demo).
+
+⸻
+
+6) Changer la version = GitOps en action
+
+Modifie l’image (exemple : autre tag ou autre image), commit + push → ArgoCD détecte et applique automatiquement (grâce à syncPolicy.automated).
+
+⸻
+
+7) (Optionnel) Ajouter un Ingress NGINX
+
+Si tu veux éviter le port-forward :
+
+# Ingress controller (helm rapide)
+kubectl create ns ingress-nginx
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx
+
+Exemple d’Ingress (app/ingress.yaml) :
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+    - host: localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hello
+                port:
+                  number: 80
+
+N’oublie pas d’ajouter le fichier au repo, commit + push.
+Sur k3d, l’Ingress sera dispo sur http://localhost/.
+
+⸻
+
+8) Sécurité & accès au repo privé (si besoin)
+	•	Pour repo privé HTTPS : crée un Repository dans ArgoCD (UI → Settings → Repositories) avec user/token.
+	•	Pour SSH : ajoute la clé publique ArgoCD à ton repo, et configure l’entrée SSH dans ArgoCD.
+
+⸻
+
+9) Nettoyage
+
+argocd app delete hello-app --yes
+k3d cluster delete demo
+
+
+⸻
+
+Mac ou Debian, finalement ?
+	•	Mac : parfait pour apprendre, vitesse de lancement imbattable.
+	•	Debian : à privilégier si tu veux coller à la prod (kernel/iptables/cgroups identiques, etc.).
+	•	Avec k3d, les commandes sont identiques → tu peux itérer sur Mac puis rejouer à l’identique sur Debian.
+
+⸻
+
+Si tu veux, je peux aussi :
+	•	te générer un template de repo complet (Makefile + Helm Chart + CI minimal),
+	•	ou remplacer les manifests par Helm et faire une Application ArgoCD qui pointe sur un chart + values.
+
+Tu veux que je te packe ça en Helm ou on garde les manifests YAML pour commencer ?
